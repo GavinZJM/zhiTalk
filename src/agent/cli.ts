@@ -1,9 +1,27 @@
 #!/usr/bin/env node
 import * as readline from 'readline'
 import { AgentCancelledError, runAgentStream } from './agent'
+import {
+  createCommandRegistry,
+  type CommandContext,
+} from './commands'
+import { formatContextWarning, formatTokenUsageLine, shouldWarnContextUsage } from './models/token_usage'
+import { printStartupBanner } from './ui/banner'
+import { style } from './ui/style'
 
-// 历史记录由 agent 的 checkpointer 自动持久化；可用环境变量覆盖会话 ID
-const THREAD_ID = process.env.ZHITALK_THREAD_ID || 'user-session-1'
+// 历史由 checkpointer 按 thread_id 持久化；可用环境变量指定初始会话
+let threadId = process.env.ZHITALK_THREAD_ID || 'user-session-1'
+
+const commands = createCommandRegistry()
+
+const session: CommandContext = {
+  get threadId() {
+    return threadId
+  },
+  setThreadId(next: string) {
+    threadId = next
+  },
+}
 
 const rl = readline.createInterface({
   input: process.stdin,
@@ -63,7 +81,7 @@ function listenForEscape(onEscape: () => void): () => void {
 async function chat(userInput: string): Promise<void> {
   rl.pause() // 暂停 readline，避免光标错位
 
-  process.stdout.write('\nAI: ')
+  process.stdout.write('\n' + style.ai('AI: '))
 
   const ac = new AbortController()
   const stopListening = listenForEscape(() => {
@@ -73,18 +91,25 @@ async function chat(userInput: string): Promise<void> {
   })
 
   try {
-    await runAgentStream(
+    const result = await runAgentStream(
       userInput,
       (token: string) => {
         process.stdout.write(token)
       },
-      THREAD_ID,
+      session.threadId,
       ac.signal,
     )
-    process.stdout.write('\n\n')
+    process.stdout.write('\n')
+    if (result.usage) {
+      console.log(style.tokenUsage(formatTokenUsageLine(result.usage)))
+      if (shouldWarnContextUsage(result.usage)) {
+        console.log(style.contextWarning(formatContextWarning()))
+      }
+    }
+    process.stdout.write('\n')
   } catch (err) {
     if (err instanceof AgentCancelledError || ac.signal.aborted) {
-      process.stdout.write('\n\n[已取消]\n\n')
+      process.stdout.write('\n\n' + style.cancelled('[已取消]') + '\n\n')
       return
     }
     throw err
@@ -94,23 +119,51 @@ async function chat(userInput: string): Promise<void> {
   }
 }
 
+async function handleInput(userInput: string): Promise<'continue' | 'exit'> {
+  if (userInput.toLowerCase() === 'exit') {
+    console.log(style.goodbye('再见！'))
+    return 'exit'
+  }
+
+  const result = await commands.dispatch(userInput, session)
+  if (result) {
+    if (result.type === 'exit') {
+      console.log(style.goodbye(result.message ?? '再见！'))
+      return 'exit'
+    }
+    if (result.type === 'error') {
+      console.log(style.commandError(result.message))
+      return 'continue'
+    }
+    if (result.message) {
+      console.log(style.commandOk(result.message))
+    }
+    return 'continue'
+  }
+
+  await chat(userInput)
+  return 'continue'
+}
+
 async function main(): Promise<void> {
-  console.log('=== Agent 聊天控制台 (输入 "exit" 退出，回复中按 ESC 取消) ===\n')
+  printStartupBanner()
 
   while (true) {
-    const userInput = await prompt('You: ')
+    const userInput = await prompt(style.you('You: '))
 
     if (!userInput.trim()) continue
-    if (userInput.toLowerCase() === 'exit') {
-      console.log('再见！')
-      rl.close()
-      break
-    }
 
     try {
-      await chat(userInput)
+      const status = await handleInput(userInput.trim())
+      if (status === 'exit') {
+        rl.close()
+        break
+      }
     } catch (err) {
-      console.error('请求出错:', (err as Error).message)
+      console.error(
+        style.errorLabel('请求出错:'),
+        style.errorMessage((err as Error).message),
+      )
     }
   }
 }

@@ -1,8 +1,22 @@
 import { createReactAgent } from '@langchain/langgraph/prebuilt'
-import { MemorySaver } from '@langchain/langgraph'
+import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite'
 import { ChatOpenAI } from '@langchain/openai'
 import * as dotenv from 'dotenv'
+import * as fs from 'fs'
 import * as path from 'path'
+import { getCheckpointerDbPath } from './checkpointer/db_path'
+import {
+  getModelId,
+  getMoonshotApiKey,
+  getMoonshotBaseUrl,
+} from './models/config'
+import { getModelContextLimit } from './models/context_limit'
+import {
+  buildTokenUsageSnapshot,
+  extractUsageFromMessage,
+  type StreamUsage,
+  type TokenUsageSnapshot,
+} from './models/token_usage'
 import { tools } from './tools'
 import { discoverSkills, formatSkillsCatalog } from './skills/registry'
 
@@ -24,18 +38,23 @@ Do not invent skill contents; always load_skill first when a skill applies.
 ${skillsCatalog}
 `
 
+const modelId = getModelId()
+
 // ── 模型 ──────────────────────────────────────────────────
 const model = new ChatOpenAI({
-  model: 'kimi-k2.6',
-  apiKey: process.env.MOONSHOT_API_KEY,
+  model: modelId,
+  apiKey: getMoonshotApiKey(),
   configuration: {
-    baseURL: 'https://api.moonshot.cn/v1',
+    baseURL: getMoonshotBaseUrl(),
   },
   streaming: true,
+  streamUsage: true,
 })
 
-// ── 记忆 / Checkpointer ───────────────────────────────────
-const checkpointer = new MemorySaver()
+// ── 记忆 / Checkpointer（SQLite 持久化） ───────────────────
+const checkpointDbPath = getCheckpointerDbPath()
+fs.mkdirSync(path.dirname(checkpointDbPath), { recursive: true })
+const checkpointer = SqliteSaver.fromConnString(checkpointDbPath)
 
 // ── Agent 创建 ────────────────────────────────────────────
 export const agent = createReactAgent({
@@ -51,6 +70,12 @@ export class AgentCancelledError extends Error {
     super(message)
     this.name = 'AgentCancelledError'
   }
+}
+
+export type RunAgentStreamResult = {
+  text: string
+  /** 本轮最后一次 LLM 调用的用量；取消或未返回 usage 时为 undefined */
+  usage?: TokenUsageSnapshot
 }
 
 function isAbortError(err: unknown): boolean {
@@ -70,14 +95,13 @@ function isAbortError(err: unknown): boolean {
  * @param onToken   - 每个 token 到来时的回调 (token: string) => void
  * @param threadId    - 会话 ID，相同 ID 自动续上历史记录
  * @param signal      - 可选 AbortSignal，用于取消本次请求
- * @returns 完整的 AI 回复文本
  */
 export async function runAgentStream(
   userMessage: string,
   onToken: (token: string) => void,
   threadId: string = 'default-session',
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<RunAgentStreamResult> {
   if (signal?.aborted) {
     throw new AgentCancelledError()
   }
@@ -89,6 +113,7 @@ export async function runAgentStream(
   }
 
   let fullResponse = ''
+  let lastUsage: StreamUsage | null = null
 
   try {
     const stream = await agent.stream(
@@ -105,6 +130,12 @@ export async function runAgentStream(
       const metadata = chunk[1]
 
       if (metadata?.langgraph_node !== 'agent') continue
+
+      const usage = extractUsageFromMessage(message)
+      if (usage) {
+        // 多轮 tool 调用时保留最后一次（上下文通常最大）
+        lastUsage = usage
+      }
 
       // AIMessageChunk 的 content 在 message.content 属性上，不在 kwargs.content
       const content: string =
@@ -123,5 +154,11 @@ export async function runAgentStream(
     throw err
   }
 
-  return fullResponse
+  let usage: TokenUsageSnapshot | undefined
+  if (lastUsage) {
+    const maxTokens = await getModelContextLimit(modelId)
+    usage = buildTokenUsageSnapshot(lastUsage, maxTokens, modelId)
+  }
+
+  return { text: fullResponse, usage }
 }

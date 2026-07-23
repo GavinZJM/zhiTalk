@@ -1,6 +1,8 @@
 import { promises as fs } from 'fs'
 import * as fsSync from 'fs'
 import * as path from 'path'
+import * as yaml from 'js-yaml'
+import { style } from '../ui/style'
 
 export type SkillMeta = {
   /** SKILL.md frontmatter 中的 name */
@@ -40,7 +42,7 @@ export function defaultSkillsRoot(): string {
 
 /**
  * 解析 SKILL.md YAML frontmatter 中的 name / description。
- * 只处理简单的 `key: value` 单行形式（与当前仓库内 skill 格式一致）。
+ * 使用 js-yaml 完整解析，支持多行字符串（>、| 等 YAML 语法）。
  */
 export function parseSkillFrontmatter(content: string): {
   name?: string
@@ -49,10 +51,14 @@ export function parseSkillFrontmatter(content: string): {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
   if (!match) return {}
 
-  const block = match[1]
-  const name = block.match(/^name:\s*(.+)\s*$/m)?.[1]?.trim()
-  const description = block.match(/^description:\s*(.+)\s*$/m)?.[1]?.trim()
-  return { name, description }
+  try {
+    const frontmatter = yaml.load(match[1]) as Record<string, any>
+    const name = typeof frontmatter?.name === 'string' ? frontmatter.name.trim() : undefined
+    const description = typeof frontmatter?.description === 'string' ? frontmatter.description.trim() : undefined
+    return { name, description }
+  } catch {
+    return {}
+  }
 }
 
 function resolveSkillFile(dir: string): string | null {
@@ -128,6 +134,6 @@ export async function loadSkillContent(
     return `Load skill failed: unknown skill "${target}". Available: ${available}`
   }
 
-  console.log(`\n[Skill] loading: ${skill.name}`)
+  console.log(style.skill(`\n[Skill] loading: ${skill.name}`))
   return fs.readFile(skill.skillFile, 'utf8')
 }

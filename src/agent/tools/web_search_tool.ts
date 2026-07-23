@@ -1,4 +1,5 @@
 import { TavilySearch } from '@langchain/tavily'
+import { style } from '../ui/style'
 
 export type WebSearchTopic = 'general' | 'news' | 'finance'
 
@@ -32,7 +33,7 @@ export async function webSearchTool(
     )
   }
 
-  console.log(`\n[Tool] web_search called: "${query}"`)
+  console.log(style.tool(`\n[Tool] web_search called: "${query}"`))
 
   const searcher =
     options.searcher ??

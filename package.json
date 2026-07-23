@@ -1,7 +1,7 @@
 {
   "name": "zhitalk",
   "version": "1.0.0",
-  "description": "",
+  "description": "A ReAct CLI agent with tools and progressive skill loading",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
@@ -15,10 +15,14 @@
     "test:coverage": "jest --coverage"
   },
   "keywords": [],
-  "author": "",
+  "author": "zhiTalk",
+  "docs": "https://github.com/gavin/zjmTalk",
   "license": "ISC",
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/figlet": "^1.7.0",
     "@types/jest": "^30.0.0",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.1.0",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.11",
@@ -29,9 +33,15 @@
   "dependencies": {
     "@langchain/core": "^1.2.1",
     "@langchain/langgraph": "^1.4.7",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.3",
     "@langchain/openai": "^1.5.3",
     "@langchain/tavily": "^1.2.0",
+    "boxen": "^5.1.2",
+    "chalk": "^4.1.2",
+    "cli-table3": "^0.6.5",
     "dotenv": "^17.4.2",
+    "figlet": "^1.11.3",
+    "js-yaml": "^5.2.1",
     "langchain": "^1.5.2",
     "zod": "^4.4.3"
   }

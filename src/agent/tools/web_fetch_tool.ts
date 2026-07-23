@@ -1,3 +1,5 @@
+import { style } from '../ui/style'
+
 export type WebFetchOptions = {
   /** 注入 fetch，便于单测不打真实网络 */
   fetchImpl?: typeof fetch
@@ -37,7 +39,7 @@ export async function webFetchTool(
     return 'Web fetch failed: fetch is not available in this runtime'
   }
 
-  console.log(`\n[Tool] web_fetch called: ${parsed.toString()}`)
+  console.log(style.tool(`\n[Tool] web_fetch called: ${parsed.toString()}`))
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
