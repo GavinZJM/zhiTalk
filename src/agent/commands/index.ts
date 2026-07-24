@@ -1,4 +1,5 @@
 import { CommandRegistry } from './registry'
+import { compactCommand } from './compact'
 import { newCommand } from './new'
 import { rewindCommand } from './rewind'
 import { sessionsCommand } from './sessions'
@@ -13,6 +14,7 @@ export function createCommandRegistry(): CommandRegistry {
   registry.register(newCommand)
   registry.register(sessionsCommand)
   registry.register(rewindCommand)
+  registry.register(compactCommand)
   return registry
 }
 
@@ -26,3 +28,4 @@ export type {
 export { createThreadId, newCommand } from './new'
 export { sessionsCommand } from './sessions'
 export { rewindCommand } from './rewind'
+export { compactCommand } from './compact'

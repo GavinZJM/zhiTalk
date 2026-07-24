@@ -110,4 +110,10 @@ describe('CommandRegistry + /new', () => {
   it('createThreadId is unique', () => {
     expect(createThreadId()).not.toBe(createThreadId())
   })
+
+  it('registers /compact command', () => {
+    const registry = createCommandRegistry()
+    expect(registry.get('compact')).toBeDefined()
+    expect(registry.get('c')).toBeDefined()
+  })
 })

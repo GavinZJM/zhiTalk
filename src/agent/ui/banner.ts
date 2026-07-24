@@ -58,6 +58,7 @@ export function printStartupBanner(): void {
   console.log(chalk.dim('  • /new                   开启新会话'))
   console.log(chalk.dim('  • /sessions              列出最近会话'))
   console.log(chalk.dim('  • /rewind <thread_id>    恢复指定会话'))
+  console.log(chalk.dim('  • /compact               手动压缩 Context'))
   console.log(chalk.dim('  • exit                   退出程序'))
   console.log()
 }

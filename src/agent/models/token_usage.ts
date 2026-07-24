@@ -71,11 +71,11 @@ export function shouldWarnContextUsage(stats: TokenUsageSnapshot): boolean {
   return stats.ratio >= CONTEXT_WARNING_RATIO
 }
 
-/** Context 接近上限时的警告文案 */
+/** Context 接近上限时的提示（压缩前） */
 export function formatContextWarning(): string {
   return [
-    '⚠ Context window 接近大模型接口上限，即将压缩 Context，可能会丢失信息。',
-    '  建议输入 /new 命令开启新会话。',
+    '⚠ Context window 接近大模型接口上限，开始压缩 Context（可能丢失细节）。',
+    '  完整记录仍保留在本地 checkpointer，未删除。',
   ].join('\n')
 }
 

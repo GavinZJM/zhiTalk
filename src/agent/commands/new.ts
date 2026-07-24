@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto'
+import { clearCompressionCache } from '../graph/context'
 import type { CommandDefinition } from './types'
 
 /** 生成新的会话 thread_id */
@@ -17,6 +18,7 @@ export const newCommand: CommandDefinition = {
   run(_args, ctx) {
     const next = createThreadId()
     const prev = ctx.threadId
+    clearCompressionCache(prev)
     ctx.setThreadId(next)
     return {
       type: 'ok',

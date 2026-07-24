@@ -60,8 +60,8 @@ describe('context warning threshold', () => {
     )
     expect(shouldWarnContextUsage(warn)).toBe(true)
     expect(shouldWarnContextUsage(ok)).toBe(false)
-    expect(formatContextWarning()).toMatch(/\/new/)
     expect(formatContextWarning()).toMatch(/压缩 Context/)
+    expect(formatContextWarning()).toMatch(/checkpointer/)
   })
 })
 

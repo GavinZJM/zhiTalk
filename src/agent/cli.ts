@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 import * as readline from 'readline'
-import { AgentCancelledError, runAgentStream } from './agent'
+import { AgentCancelledError, compressContext, runAgentStream } from './agent'
 import {
   createCommandRegistry,
   type CommandContext,
 } from './commands'
-import { formatContextWarning, formatTokenUsageLine, shouldWarnContextUsage } from './models/token_usage'
+import {
+  formatContextWarning,
+  formatTokenUsageLine,
+  shouldWarnContextUsage,
+} from './models/token_usage'
 import { printStartupBanner } from './ui/banner'
 import { style } from './ui/style'
 
@@ -104,6 +108,15 @@ async function chat(userInput: string): Promise<void> {
       console.log(style.tokenUsage(formatTokenUsageLine(result.usage)))
       if (shouldWarnContextUsage(result.usage)) {
         console.log(style.contextWarning(formatContextWarning()))
+        try {
+          const compressResult = await compressContext(session.threadId)
+          console.log(style.contextCompress(compressResult.message))
+        } catch (compressErr) {
+          console.error(
+            style.errorLabel('Context 压缩失败:'),
+            style.errorMessage((compressErr as Error).message),
+          )
+        }
       }
     }
     process.stdout.write('\n')

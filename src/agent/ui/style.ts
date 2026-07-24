@@ -12,6 +12,7 @@ export const style = {
   commandError: (s: string) => chalk.yellow(s),
   tokenUsage: (s: string) => chalk.dim(s),
   contextWarning: (s: string) => chalk.yellow(s),
+  contextCompress: (s: string) => chalk.magenta(s),
   skill: (s: string) => chalk.magenta(s),
   tool: (s: string) => chalk.gray(s),
   toolPreview: (s: string) => chalk.dim(s),

@@ -1,15 +1,12 @@
-import { createReactAgent } from '@langchain/langgraph/prebuilt'
-import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite'
-import { ChatOpenAI } from '@langchain/openai'
 import * as dotenv from 'dotenv'
-import * as fs from 'fs'
 import * as path from 'path'
-import { getCheckpointerDbPath } from './checkpointer/db_path'
+import { agent, modelId } from './graph/app'
 import {
-  getModelId,
-  getMoonshotApiKey,
-  getMoonshotBaseUrl,
-} from './models/config'
+  compressThreadContext,
+  type CompressContextResult,
+  type CompressThreadContextOptions,
+} from './graph/context'
+import { getThreadState } from './graph/thread_history'
 import { getModelContextLimit } from './models/context_limit'
 import {
   buildTokenUsageSnapshot,
@@ -17,52 +14,11 @@ import {
   type StreamUsage,
   type TokenUsageSnapshot,
 } from './models/token_usage'
-import { tools } from './tools'
-import { discoverSkills, formatSkillsCatalog } from './skills/registry'
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') })
 dotenv.config()
 
-// ── Skills：启动时扫描 name + description ─────────────────
-const skills = discoverSkills()
-const skillsCatalog = formatSkillsCatalog(skills)
-
-const systemPrompt = `You are a helpful assistant.
-
-## Available Skills
-The following skills are available. Each entry shows only name and description.
-When the user's request matches a skill description, you MUST call the load_skill tool with that skill's exact name to load its full SKILL.md instructions, then follow those instructions.
-You can load only one skill per load_skill call.
-Do not invent skill contents; always load_skill first when a skill applies.
-
-${skillsCatalog}
-`
-
-const modelId = getModelId()
-
-// ── 模型 ──────────────────────────────────────────────────
-const model = new ChatOpenAI({
-  model: modelId,
-  apiKey: getMoonshotApiKey(),
-  configuration: {
-    baseURL: getMoonshotBaseUrl(),
-  },
-  streaming: true,
-  streamUsage: true,
-})
-
-// ── 记忆 / Checkpointer（SQLite 持久化） ───────────────────
-const checkpointDbPath = getCheckpointerDbPath()
-fs.mkdirSync(path.dirname(checkpointDbPath), { recursive: true })
-const checkpointer = SqliteSaver.fromConnString(checkpointDbPath)
-
-// ── Agent 创建 ────────────────────────────────────────────
-export const agent = createReactAgent({
-  llm: model,
-  tools,
-  messageModifier: systemPrompt,
-  checkpointer,
-})
+export { agent }
 
 /** 用户主动取消（如按 ESC）时抛出 */
 export class AgentCancelledError extends Error {
@@ -87,6 +43,17 @@ function isAbortError(err: unknown): boolean {
     e.code === 'ABORT_ERR' ||
     (typeof e.message === 'string' && /aborted|abort/i.test(e.message))
   )
+}
+
+/**
+ * 压缩指定会话的 Context（读 checkpointer 消息，结果写入进程内缓存，不改库内历史）。
+ */
+export async function compressContext(
+  threadId: string,
+  options?: CompressThreadContextOptions,
+): Promise<CompressContextResult> {
+  const { messages } = await getThreadState(threadId)
+  return compressThreadContext(threadId, messages, options)
 }
 
 /**
@@ -162,3 +129,18 @@ export async function runAgentStream(
 
   return { text: fullResponse, usage }
 }
+
+export {
+  getThreadState,
+  replaceThreadMessages,
+  rewriteThreadMessage,
+  setThreadSummary,
+} from './graph/thread_history'
+export {
+  buildModelContext,
+  buildLlmInput,
+  compressThreadContext,
+  clearCompressionCache,
+  summarizeMessagesWithAi,
+} from './graph/context'
+export type { CompressContextResult } from './graph/context'

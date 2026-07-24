@@ -3,7 +3,6 @@ import { promises as fs } from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { promisify } from 'util'
-import { style } from '../ui/style'
 
 const execFileAsync = promisify(execFile)
 
@@ -70,11 +69,6 @@ export async function runPyTool(
   if (!code || !code.trim()) {
     throw new Error('code is required')
   }
-
-  console.log(style.tool(`\n[Tool] run_py called (${code.length} chars)`))
-  console.log(
-    style.toolPreview(`[Tool] run_py preview: ${code.slice(0, 80).replace(/\n/g, ' ')}`),
-  )
 
   // options.pythonBinary：
   //   - undefined：自动探测
