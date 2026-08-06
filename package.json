@@ -1,6 +1,6 @@
 {
   "name": "zjmtalk",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A ReAct CLI agent with tools and progressive skill loading",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
