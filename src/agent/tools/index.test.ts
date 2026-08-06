@@ -1,9 +1,11 @@
 import {
+  agent_tool,
   exec_tool,
   load_skill_tool,
   read_file_tool,
   run_js_tool,
   run_py_tool,
+  subagentTools,
   tools,
   web_fetch_tool,
   web_search_tool,
@@ -55,16 +57,25 @@ describe('tools registry', () => {
   })
 
   it('exposes tools list for the agent', () => {
-    expect(tools).toEqual([
-      read_file_tool,
-      write_file_tool,
-      exec_tool,
-      run_js_tool,
-      run_py_tool,
-      web_search_tool,
-      web_fetch_tool,
-      load_skill_tool,
+    expect(tools.map((t) => t.name)).toEqual([
+      'exec',
+      'run_js',
+      'run_py',
+      'web_search',
+      'web_fetch',
+      'read_file',
+      'write_file',
+      'load_skill',
+      'memory_create',
+      'memory_retrieve',
+      'memory_delete',
+      'profile_update',
+      'list_mcp_resources',
+      'read_mcp_resource',
+      'agent_tool',
     ])
+    expect(subagentTools.map((t) => t.name)).not.toContain('agent_tool')
+    expect(tools).toContain(agent_tool)
   })
 
   it('invokes read_file_tool with relative and absolute paths', async () => {

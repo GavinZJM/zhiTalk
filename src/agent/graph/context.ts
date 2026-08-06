@@ -8,16 +8,17 @@ import {
   isBaseMessage,
 } from '@langchain/core/messages'
 import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph'
-import { ChatOpenAI } from '@langchain/openai'
-import {
-  getModelId,
-  getMoonshotApiKey,
-  getMoonshotBaseUrl,
-} from '../models/config'
+import { createChatModel } from '../models/model'
 import type { AgentStateType } from './state'
 
 /** 压缩时保留的最近消息条数（不参与压缩） */
 export const KEEP_RECENT_MESSAGES = 6
+
+/** 历史 ToolMessage 简化时，保留最近 N 条原文不简化 */
+export const KEEP_RECENT_TOOL_MESSAGES = 3
+
+/** 永不简化内容的 tool 名（与 tools/index 中 name 一致） */
+export const PRESERVE_TOOL_MESSAGE_NAMES = new Set(['read_file'])
 
 /** 压缩次数达到该值后强烈建议 /new */
 export const COMPRESSION_COUNT_WARN_AT = 3
@@ -128,11 +129,9 @@ export async function summarizeMessagesWithAi(
 
   const model =
     options.model ??
-    new ChatOpenAI({
-      model: getModelId(),
-      apiKey: getMoonshotApiKey(),
-      configuration: { baseURL: getMoonshotBaseUrl() },
+    createChatModel({
       streaming: false,
+      streamUsage: false,
       // kimi-k2.x 不允许自定义 temperature（仅允许模型固定值）
     })
 
@@ -312,11 +311,60 @@ export function sanitizeToolCallPairs(messages: BaseMessage[]): BaseMessage[] {
 }
 
 /**
+ * 简化历史 ToolMessage 内容，减轻 context 臃肿。
+ * - 只改 ToolMessage；Human / AI / System 不动
+ * - 不写 checkpointer，仅作用于送给模型的副本
+ * - read_file（及 options.preserveToolNames）永不简化
+ * - 最近 keepRecentTools 条 ToolMessage 保留原文
+ */
+export function simplifyHistoricalToolMessages(
+  messages: BaseMessage[],
+  options: {
+    keepRecentTools?: number
+    preserveToolNames?: ReadonlySet<string>
+  } = {},
+): BaseMessage[] {
+  const keepRecentTools = options.keepRecentTools ?? KEEP_RECENT_TOOL_MESSAGES
+  const preserve =
+    options.preserveToolNames ?? PRESERVE_TOOL_MESSAGE_NAMES
+
+  const toolIndices: number[] = []
+  for (let i = 0; i < messages.length; i++) {
+    if (ToolMessage.isInstance(messages[i])) toolIndices.push(i)
+  }
+
+  const keepSet = new Set(
+    keepRecentTools > 0 ? toolIndices.slice(-keepRecentTools) : [],
+  )
+
+  return messages.map((msg, index) => {
+    if (!ToolMessage.isInstance(msg)) return msg
+    if (keepSet.has(index)) return msg
+
+    const toolName = msg.name || 'tool'
+    if (preserve.has(toolName)) return msg
+
+    const simplified = `[Previous: used ${toolName}]`
+    if (String(msg.content) === simplified) return msg
+
+    return new ToolMessage({
+      content: simplified,
+      tool_call_id: msg.tool_call_id,
+      name: msg.name,
+      id: msg.id,
+      additional_kwargs: msg.additional_kwargs,
+      response_metadata: msg.response_metadata,
+    })
+  })
+}
+
+/**
  * 【控制点】决定「这一轮真正送给模型」的消息列表。
  *
  * - 无压缩缓存摘要：用 state.messages 全文
  * - 有缓存摘要：用「摘要 + 最近 keepRecent 条」（不改 checkpointer）
- * - 最后统一 sanitizeToolCallPairs，避免截断/中断留下残缺 tool 对
+ * - sanitizeToolCallPairs：补全残缺 tool 对
+ * - simplifyHistoricalToolMessages：压缩旧 ToolMessage 正文
  */
 export function buildModelContext(
   state: Pick<AgentStateType, 'messages' | 'summary'>,
@@ -330,19 +378,16 @@ export function buildModelContext(
   // 优先用进程内压缩缓存；不读/不依赖 checkpointer 里的 summary 字段
   const summary = cached || ''
 
-  if (!summary) {
-    return sanitizeToolCallPairs([...messages])
-  }
+  const selected = !summary
+    ? [...messages]
+    : [
+        new HumanMessage({
+          content: `【对话摘要】\n${summary}`,
+        }),
+        ...(keepRecent > 0 ? messages.slice(-keepRecent) : []),
+      ]
 
-  const recent =
-    keepRecent > 0 ? messages.slice(-keepRecent) : ([] as BaseMessage[])
-
-  return sanitizeToolCallPairs([
-    new HumanMessage({
-      content: `【对话摘要】\n${summary}`,
-    }),
-    ...recent,
-  ])
+  return simplifyHistoricalToolMessages(sanitizeToolCallPairs(selected))
 }
 
 /** 给模型调用用：system + buildModelContext(...) */

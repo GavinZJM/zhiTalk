@@ -11,7 +11,7 @@ import {
 import { createCommandRegistry } from '../commands'
 
 function createTempDb(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhitalk-sessions-'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zjmTalk-sessions-'))
   const dbPath = path.join(dir, 'checkpointer.db')
   const db = new Database(dbPath)
   db.exec(`
@@ -160,13 +160,11 @@ describe('listRecentSessions', () => {
 describe('/sessions command', () => {
   it('dispatches without touching LLM and returns a table', async () => {
     const dbPath = createTempDb()
-    const prevCwd = process.cwd()
-    const fakeRoot = path.dirname(dbPath)
+    const dataDir = path.dirname(dbPath)
+    const prevDataDir = process.env.ZJMTALK_DATA_DIR
     try {
-      // getCheckpointerDbPath 使用 cwd/.data/checkpointer.db
-      fs.mkdirSync(path.join(fakeRoot, '.data'), { recursive: true })
-      fs.renameSync(dbPath, path.join(fakeRoot, '.data', 'checkpointer.db'))
-      process.chdir(fakeRoot)
+      // getCheckpointerDbPath 使用 ~/.zjmTalk/.data 或 ZJMTALK_DATA_DIR
+      process.env.ZJMTALK_DATA_DIR = dataDir
 
       const registry = createCommandRegistry()
       const result = await registry.dispatch('/sessions', {
@@ -178,8 +176,9 @@ describe('/sessions command', () => {
       expect(result?.type === 'ok' && result.message).toContain('thread_id')
       expect(result?.type === 'ok' && result.message).toMatch(/[│├└┌]/)
     } finally {
-      process.chdir(prevCwd)
-      fs.rmSync(fakeRoot, { recursive: true, force: true })
+      if (prevDataDir === undefined) delete process.env.ZJMTALK_DATA_DIR
+      else process.env.ZJMTALK_DATA_DIR = prevDataDir
+      fs.rmSync(dataDir, { recursive: true, force: true })
     }
   })
 })

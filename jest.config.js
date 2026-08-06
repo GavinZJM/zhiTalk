@@ -7,6 +7,7 @@ module.exports = {
   collectCoverageFrom: ['src/**/*.ts', '!src/**/__tests__/**', '!src/**/*.test.ts'],
   coverageDirectory: 'coverage',
   clearMocks: true,
+  setupFiles: ['<rootDir>/jest.setup.cjs'],
   transform: {
     '^.+\\.tsx?$': [
       'ts-jest',

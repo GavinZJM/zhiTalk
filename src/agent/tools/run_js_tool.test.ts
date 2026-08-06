@@ -59,6 +59,6 @@ describe('runJsTool', () => {
       nodeBinary: process.execPath,
     })
     const files = await fs.readdir(tmpDir)
-    expect(files.filter((f) => f.startsWith('zhitalk-run-js-'))).toHaveLength(0)
+    expect(files.filter((f) => f.startsWith('zjmTalk-run-js-'))).toHaveLength(0)
   })
 })

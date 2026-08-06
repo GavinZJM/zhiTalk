@@ -1,27 +1,40 @@
-import { AIMessage } from '@langchain/core/messages'
+import {
+  AIMessage,
+  SystemMessage,
+  ToolMessage,
+} from '@langchain/core/messages'
+import type { StructuredToolInterface } from '@langchain/core/tools'
 import {
   START,
   StateGraph,
 } from '@langchain/langgraph'
 import { ToolNode, toolsCondition } from '@langchain/langgraph/prebuilt'
 import { SqliteSaver } from '@langchain/langgraph-checkpoint-sqlite'
-import { ChatOpenAI } from '@langchain/openai'
 import type { RunnableConfig } from '@langchain/core/runnables'
 import * as dotenv from 'dotenv'
-import * as fs from 'fs'
 import * as path from 'path'
-import { getCheckpointerDbPath } from '../checkpointer/db_path'
+import { ensureCheckpointerDatabase } from '../checkpointer/db_path'
 import {
-  getModelId,
-  getMoonshotApiKey,
-  getMoonshotBaseUrl,
-} from '../models/config'
-import { tools } from '../tools'
+  formatHookInjection,
+  getSessionHookExtras,
+  runHooks,
+} from '../hooks'
+import { createChatModel, getModelId } from '../models/model'
+import { subagentTools, tools, agent_tool } from '../tools'
+import { getToolPermissionLevel } from '../tools/permission'
 import { maybeSpillToolMessage } from '../tools/spill_tool_output'
 import { discoverSkills, formatSkillsCatalog } from '../skills/registry'
 import { style } from '../ui/style'
+import { memoryPrompt } from '../memory_prompt'
+import { buildProfilePrompt, buildSystemPrompt } from '../prompt'
+import {
+  getMcpCatalogText,
+  initMcpRuntime,
+  shutdownMcpRuntime,
+} from '../mcp'
 import { buildLlmInput } from './context'
 import { AgentState, type AgentStateType } from './state'
+import { classifyToolPermission } from '../permission/classify'
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') })
 dotenv.config()
@@ -29,68 +42,47 @@ dotenv.config()
 const skills = discoverSkills()
 const skillsCatalog = formatSkillsCatalog(skills)
 
-export const systemPrompt = `You are a helpful assistant.
+export { memoryPrompt, buildProfilePrompt, buildSystemPrompt }
 
-## Available Skills
-The following skills are available. Each entry shows only name and description.
-When the user's request matches a skill description, you MUST call the load_skill tool with that skill's exact name to load its full SKILL.md instructions, then follow those instructions.
-You can load only one skill per load_skill call.
-Do not invent skill contents; always load_skill first when a skill applies.
-
-${skillsCatalog}
-
-## Large Tool Outputs
-If a tool result is too large, it is saved to a local file and the message only contains the file path plus a short preview.
-Do not pretend you already have the full output. When you need more of it, use exec / run_js / run_py to read that file in chunks (head, sed, or open().read()[:N]).
-`
-
-export const modelId = getModelId()
-
-const model = new ChatOpenAI({
-  model: modelId,
-  apiKey: getMoonshotApiKey(),
-  configuration: {
-    baseURL: getMoonshotBaseUrl(),
-  },
-  streaming: true,
-  streamUsage: true,
-}).bindTools(tools)
-
-const checkpointDbPath = getCheckpointerDbPath()
-fs.mkdirSync(path.dirname(checkpointDbPath), { recursive: true })
-const checkpointer = SqliteSaver.fromConnString(checkpointDbPath)
-
-/**
- * agent 节点：通过 buildLlmInput / buildModelContext
- * 控制真正传给大模型的聊天记录（可读进程内压缩缓存，不改 checkpointer）。
- */
-async function callModel(state: AgentStateType, config: RunnableConfig) {
-  const threadId = String(config.configurable?.thread_id ?? '')
-  const llmMessages = buildLlmInput(systemPrompt, state, { threadId })
-  const response = await model.invoke(llmMessages)
-  return { messages: [response] }
+/** 兼容旧用法：每次访问时重新读取 profile.md */
+export function profilePrompt(): string {
+  return buildProfilePrompt()
 }
 
-const toolsExecutor = new ToolNode(tools)
+/** 完整 system prompt（含当前 profile.md + SessionStart + MCP catalog）；每次调用重新构建 */
+export function getSystemPrompt(): string {
+  const base = buildSystemPrompt(skillsCatalog, getMcpCatalogText())
+  const extras = getSessionHookExtras()
+  if (!extras) return base
+  return `${base}\n\n## Session Hook Context\n${extras}`
+}
 
-/**
- * tools 节点：调用前打印工具名与参数；调用后若输出过大则落盘，messages 只保留路径提示。
- */
-async function toolNode(state: AgentStateType, config: RunnableConfig) {
-  const lastMessage = state.messages.at(-1)
-  if (AIMessage.isInstance(lastMessage)) {
-    for (const call of lastMessage.tool_calls ?? []) {
-      if (!call?.name) continue
-      console.log(style.tool(`\n[Tool] ${call.name}`))
-      const argsText = formatToolArgs(call.args)
-      if (argsText) {
-        console.log(style.toolPreview(argsText))
-      }
-    }
-  }
+/** @deprecated 使用 getSystemPrompt()，以便加载最新 profile */
+export const systemPrompt = getSystemPrompt()
 
-  const result = await toolsExecutor.invoke(state, config)
-  return rewriteLargeToolOutputs(result)
+/** 当前配置中的模型 id（读自 ~/.zjmTalk/zjmTalk.json） */
+export function modelId(): string {
+  return getModelId()
+}
+
+const checkpointDbPath = ensureCheckpointerDatabase()
+const checkpointer = SqliteSaver.fromConnString(checkpointDbPath)
+
+type ToolCallLike = {
+  id?: string
+  name?: string
+  args?: unknown
+}
+
+function rejectToolMessage(
+  call: ToolCallLike,
+  content: string,
+): ToolMessage {
+  return new ToolMessage({
+    content,
+    tool_call_id: String(call.id ?? ''),
+    name: call.name,
+  })
 }
 
 function formatToolArgs(args: unknown, maxLen = 800): string {
@@ -121,11 +113,256 @@ async function rewriteLargeToolOutputs(result: unknown): Promise<unknown> {
   return { ...record, messages }
 }
 
-/** 编译后的 StateGraph（带 SQLite checkpointer） */
-export const agent = new StateGraph(AgentState)
-  .addNode('agent', callModel)
-  .addNode('tools', toolNode)
-  .addEdge(START, 'agent')
-  .addConditionalEdges('agent', toolsCondition)
-  .addEdge('tools', 'agent')
-  .compile({ checkpointer })
+/**
+ * 用指定 tool 列表编译一张 StateGraph（main / sub 共用同一套节点逻辑与 checkpointer）。
+ */
+export function compileAgentGraph(toolList: StructuredToolInterface[]) {
+  const model = createChatModel({
+    streaming: true,
+    streamUsage: true,
+  }).bindTools(toolList)
+
+  const toolsExecutor = new ToolNode(toolList)
+
+  async function callModel(state: AgentStateType, config: RunnableConfig) {
+    const threadId = String(config.configurable?.thread_id ?? '')
+    const llmMessages = buildLlmInput(getSystemPrompt(), state, { threadId })
+    const response = await model.invoke(llmMessages)
+    return { messages: [response] }
+  }
+
+  async function toolNode(state: AgentStateType, config: RunnableConfig) {
+    const lastMessage = state.messages.at(-1)
+    const toolCalls = AIMessage.isInstance(lastMessage)
+      ? (lastMessage.tool_calls ?? []).filter((c) => c?.name)
+      : []
+
+    const projectRoot = process.cwd()
+    const threadId = String(config.configurable?.thread_id ?? '')
+    const preInjects: SystemMessage[] = []
+    const preResults: ToolMessage[] = []
+    const toRun: ToolCallLike[] = []
+
+    for (const call of toolCalls) {
+      const matched = toolList.find((t) => t.name === call.name)
+      const permission_level = matched
+        ? getToolPermissionLevel(matched)
+        : undefined
+      const policy = classifyToolPermission(
+        { permission_level, args: call.args },
+        { projectRoot, cwd: projectRoot },
+      )
+
+      if (policy.action === 'block') {
+        preResults.push(
+          rejectToolMessage(
+            call,
+            policy.reason ||
+              'Access denied: path is protected and cannot be accessed by tools.',
+          ),
+        )
+        console.log(
+          style.tool(
+            `\n[Tool blocked] ${call.name}: ${policy.filepath ?? '(path)'}`,
+          ),
+        )
+        continue
+      }
+
+      const preHook = await runHooks(
+        'PreToolUse',
+        {
+          thread_id: threadId,
+          tool_name: call.name,
+          tool_input: call.args,
+          permission_level,
+          cwd: projectRoot,
+        },
+        { matchAgainst: call.name ?? '', cwd: projectRoot },
+      )
+
+      if (preHook.blocked) {
+        preResults.push(
+          rejectToolMessage(
+            call,
+            preHook.blockMessage || 'Blocked by PreToolUse hook.',
+          ),
+        )
+        console.log(
+          style.tool(`\n[Tool blocked by hook] ${call.name}`),
+        )
+        continue
+      }
+
+      for (const inj of preHook.injections) {
+        const text = formatHookInjection('PreToolUse', inj)
+        if (text) preInjects.push(new SystemMessage(text))
+      }
+
+      toRun.push(call)
+    }
+
+    if (toRun.length === 0) {
+      return { messages: [...preInjects, ...preResults] }
+    }
+
+    for (const call of toRun) {
+      console.log(style.tool(`\n[Tool] ${call.name}`))
+      const argsText = formatToolArgs(call.args)
+      if (argsText) {
+        console.log(style.toolPreview(argsText))
+      }
+    }
+
+    const stateForRun = {
+      ...state,
+      messages: [...state.messages, ...preInjects, ...preResults],
+    }
+    const result = await toolsExecutor.invoke(stateForRun, config)
+    const rewritten = await rewriteLargeToolOutputs(result)
+    const runMessages =
+      rewritten &&
+      typeof rewritten === 'object' &&
+      Array.isArray((rewritten as { messages?: unknown[] }).messages)
+        ? ((rewritten as { messages: unknown[] }).messages as ToolMessage[])
+        : []
+
+    const postInjects: SystemMessage[] = []
+    const finalToolMessages: ToolMessage[] = []
+    const argsByCallId = new Map<string, unknown>()
+    for (const call of toolCalls) {
+      if (call.id) argsByCallId.set(String(call.id), call.args)
+    }
+
+    for (const msg of runMessages) {
+      if (!ToolMessage.isInstance(msg)) {
+        finalToolMessages.push(msg as ToolMessage)
+        continue
+      }
+
+      const toolName = String(msg.name ?? '')
+      const matched = toolList.find((t) => t.name === toolName)
+      const permission_level = matched
+        ? getToolPermissionLevel(matched)
+        : undefined
+      const toolOutput =
+        typeof msg.content === 'string'
+          ? msg.content
+          : JSON.stringify(msg.content)
+      const toolInput = argsByCallId.get(String(msg.tool_call_id))
+
+      const postHook = await runHooks(
+        'PostToolUse',
+        {
+          thread_id: threadId,
+          tool_name: toolName,
+          tool_input: toolInput,
+          tool_output: toolOutput,
+          permission_level,
+          cwd: projectRoot,
+        },
+        { matchAgainst: toolName, cwd: projectRoot },
+      )
+
+      if (postHook.blocked) {
+        finalToolMessages.push(
+          new ToolMessage({
+            content:
+              postHook.blockMessage || 'Overwritten by PostToolUse hook.',
+            tool_call_id: msg.tool_call_id,
+            name: msg.name,
+          }),
+        )
+        continue
+      }
+
+      finalToolMessages.push(msg)
+      for (const inj of postHook.injections) {
+        const text = formatHookInjection('PostToolUse', inj)
+        if (text) postInjects.push(new SystemMessage(text))
+      }
+    }
+
+    return {
+      messages: [
+        ...preInjects,
+        ...preResults,
+        ...finalToolMessages,
+        ...postInjects,
+      ],
+    }
+  }
+
+  return new StateGraph(AgentState)
+    .addNode('agent', callModel)
+    .addNode('tools', toolNode)
+    .addEdge(START, 'agent')
+    .addConditionalEdges('agent', toolsCondition)
+    .addEdge('tools', 'agent')
+    .compile({ checkpointer })
+}
+
+type CompiledAgent = ReturnType<typeof compileAgentGraph>
+
+/** 默认先用本地 tools 编译；initAgentRuntime 后会挂上 MCP tools 并重建 */
+let mainGraph: CompiledAgent | null = null
+let subGraph: CompiledAgent | null = null
+let runtimeReady = false
+
+function ensureDefaultGraphs(): void {
+  if (!mainGraph) mainGraph = compileAgentGraph(tools)
+  if (!subGraph) subGraph = compileAgentGraph(subagentTools)
+}
+
+/**
+ * 连接 MCP、合并 tools、重新编译 main/sub 图。
+ * CLI 启动时调用；可重复调用（会先关闭旧 MCP 连接）。
+ */
+export async function initAgentRuntime(options?: {
+  configPath?: string
+}): Promise<void> {
+  const mcpState = await initMcpRuntime({ configPath: options?.configPath })
+  const mcpTools = mcpState.mcpTools
+
+  const subTools = [...subagentTools, ...mcpTools]
+  const mainTools = [...subTools, agent_tool]
+
+  mainGraph = compileAgentGraph(mainTools)
+  subGraph = compileAgentGraph(subTools)
+  runtimeReady = true
+}
+
+export async function shutdownAgentRuntime(): Promise<void> {
+  await shutdownMcpRuntime()
+  mainGraph = compileAgentGraph(tools)
+  subGraph = compileAgentGraph(subagentTools)
+  runtimeReady = false
+}
+
+export function isAgentRuntimeReady(): boolean {
+  return runtimeReady
+}
+
+export function getAgentGraph(variant: 'main' | 'sub' = 'main'): CompiledAgent {
+  ensureDefaultGraphs()
+  return variant === 'sub' ? subGraph! : mainGraph!
+}
+
+/** 转发到当前 mainGraph（initAgentRuntime 后自动切到含 MCP 的图） */
+function liveGraphProxy(getGraph: () => CompiledAgent): CompiledAgent {
+  return new Proxy({} as CompiledAgent, {
+    get(_target, prop) {
+      const g = getGraph() as unknown as Record<string | symbol, unknown>
+      const value = g[prop]
+      return typeof value === 'function'
+        ? (value as (...args: unknown[]) => unknown).bind(g)
+        : value
+    },
+  })
+}
+
+/** Main agent 图（Proxy，始终指向最新编译结果） */
+export const agent = liveGraphProxy(() => getAgentGraph('main'))
+
+/** Subagent 图 */
+export const subAgent = liveGraphProxy(() => getAgentGraph('sub'))

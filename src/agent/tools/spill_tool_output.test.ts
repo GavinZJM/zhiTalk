@@ -3,6 +3,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { ToolMessage } from '@langchain/core/messages'
 import {
+  getToolOutputDir,
   maybeSpillToolMessage,
   spillLargeToolOutput,
   toolOutputContentLength,
@@ -17,6 +18,12 @@ describe('spill_tool_output', () => {
 
   afterEach(async () => {
     await fs.rm(tmpDir, { recursive: true, force: true })
+  })
+
+  it('getToolOutputDir uses ~/.zjmTalk/.tool_output', () => {
+    expect(getToolOutputDir()).toBe(
+      path.join(os.homedir(), '.zjmTalk', '.tool_output'),
+    )
   })
 
   it('keeps small output inline', async () => {

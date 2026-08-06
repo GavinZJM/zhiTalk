@@ -1,12 +1,27 @@
+import { SystemMessage } from '@langchain/core/messages'
 import * as dotenv from 'dotenv'
 import * as path from 'path'
-import { agent, modelId } from './graph/app'
+import { getAgentGraph } from './graph/app'
+import { getModelId } from './models/model'
+export {
+  initAgentRuntime,
+  shutdownAgentRuntime,
+  isAgentRuntimeReady,
+  getAgentGraph,
+  agent,
+  subAgent,
+} from './graph/app'
 import {
   compressThreadContext,
   type CompressContextResult,
   type CompressThreadContextOptions,
 } from './graph/context'
 import { getThreadState } from './graph/thread_history'
+import {
+  formatHookInjection,
+  HookBlockedError,
+  runHooks,
+} from './hooks'
 import { getModelContextLimit } from './models/context_limit'
 import {
   buildTokenUsageSnapshot,
@@ -15,10 +30,15 @@ import {
   type TokenUsageSnapshot,
 } from './models/token_usage'
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') })
-dotenv.config()
-
-export { agent }
+export { memoryPrompt } from './memory_prompt'
+export {
+  buildProfilePrompt,
+  buildSystemPrompt,
+  getProfileMdPath,
+  loadProfileInfo,
+  wrapProfileInfo,
+} from './prompt'
+export { buildProfilePrompt as profilePrompt } from './prompt'
 
 /** 用户主动取消（如按 ESC）时抛出 */
 export class AgentCancelledError extends Error {
@@ -33,6 +53,24 @@ export type RunAgentStreamResult = {
   /** 本轮最后一次 LLM 调用的用量；取消或未返回 usage 时为 undefined */
   usage?: TokenUsageSnapshot
 }
+
+export type RunAgentStreamOptions = {
+  onToken: (token: string) => void
+  threadId?: string
+  signal?: AbortSignal
+  /**
+   * 为 true 时跳过 UserPromptSubmit hooks（调用方已自行处理时使用）。
+   * 默认 false：在 stream 前统一跑 hooks。
+   */
+  skipUserPromptHooks?: boolean
+  /**
+   * main（默认）：主 agent 图（含 agent_tool）
+   * sub：subagent 图（不含 agent_tool）
+   */
+  variant?: 'main' | 'sub'
+}
+
+export { HookBlockedError } from './hooks'
 
 function isAbortError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
@@ -57,39 +95,92 @@ export async function compressContext(
 }
 
 /**
- * 以流式方式运行 agent，将 token 逐个回调给调用方
- * @param userMessage - 当前用户输入（历史已由 checkpointer 自动续接）
- * @param onToken   - 每个 token 到来时的回调 (token: string) => void
- * @param threadId    - 会话 ID，相同 ID 自动续上历史记录
- * @param signal      - 可选 AbortSignal，用于取消本次请求
+ * Main / Subagent 共用的启动与流式执行逻辑。
+ * - 仅接收本轮 userMessage（纯文本）；历史由 checkpointer + thread_id 续接
+ * - variant=sub 时走 subAgent 图（无 agent_tool）
  */
 export async function runAgentStream(
   userMessage: string,
   onToken: (token: string) => void,
+  threadId?: string,
+  signal?: AbortSignal,
+): Promise<RunAgentStreamResult>
+export async function runAgentStream(
+  userMessage: string,
+  options: RunAgentStreamOptions,
+): Promise<RunAgentStreamResult>
+export async function runAgentStream(
+  userMessage: string,
+  onTokenOrOptions: ((token: string) => void) | RunAgentStreamOptions,
   threadId: string = 'default-session',
   signal?: AbortSignal,
 ): Promise<RunAgentStreamResult> {
-  if (signal?.aborted) {
+  const options: RunAgentStreamOptions =
+    typeof onTokenOrOptions === 'function'
+      ? {
+          onToken: onTokenOrOptions,
+          threadId,
+          signal,
+        }
+      : onTokenOrOptions
+
+  const {
+    onToken,
+    threadId: tid = 'default-session',
+    signal: abortSignal,
+    skipUserPromptHooks = false,
+    variant = 'main',
+  } = options
+
+  if (abortSignal?.aborted) {
     throw new AgentCancelledError()
   }
 
+  const graph = getAgentGraph(variant)
+
   const config = {
-    configurable: { thread_id: threadId },
-    signal,
+    configurable: { thread_id: tid },
+    signal: abortSignal,
     streamMode: 'messages' as const,
   }
+
+  const inputMessages: Array<
+    SystemMessage | { role: 'user'; content: string }
+  > = []
+
+  if (!skipUserPromptHooks) {
+    const promptHook = await runHooks(
+      'UserPromptSubmit',
+      {
+        thread_id: tid,
+        prompt: userMessage,
+      },
+      { matchAgainst: 'UserPromptSubmit' },
+    )
+
+    if (promptHook.blocked) {
+      throw new HookBlockedError(
+        'UserPromptSubmit',
+        promptHook.blockMessage || 'Blocked by UserPromptSubmit hook.',
+      )
+    }
+
+    for (const inj of promptHook.injections) {
+      const text = formatHookInjection('UserPromptSubmit', inj)
+      if (text) inputMessages.push(new SystemMessage(text))
+    }
+  }
+
+  inputMessages.push({ role: 'user', content: userMessage })
 
   let fullResponse = ''
   let lastUsage: StreamUsage | null = null
 
   try {
-    const stream = await agent.stream(
-      { messages: [{ role: 'user', content: userMessage }] },
-      config,
-    )
+    const stream = await graph.stream({ messages: inputMessages }, config)
 
     for await (const chunk of stream as any) {
-      if (signal?.aborted) {
+      if (abortSignal?.aborted) {
         throw new AgentCancelledError()
       }
 
@@ -104,7 +195,6 @@ export async function runAgentStream(
         lastUsage = usage
       }
 
-      // AIMessageChunk 的 content 在 message.content 属性上，不在 kwargs.content
       const content: string =
         (message as any).content ?? (message as any).kwargs?.content ?? ''
       const toolCallChunks = (message as any).tool_call_chunks ?? []
@@ -115,7 +205,7 @@ export async function runAgentStream(
       fullResponse += content
     }
   } catch (err) {
-    if (signal?.aborted || isAbortError(err)) {
+    if (abortSignal?.aborted || isAbortError(err)) {
       throw new AgentCancelledError()
     }
     throw err
@@ -123,8 +213,9 @@ export async function runAgentStream(
 
   let usage: TokenUsageSnapshot | undefined
   if (lastUsage) {
-    const maxTokens = await getModelContextLimit(modelId)
-    usage = buildTokenUsageSnapshot(lastUsage, maxTokens, modelId)
+    const id = getModelId()
+    const maxTokens = await getModelContextLimit(id)
+    usage = buildTokenUsageSnapshot(lastUsage, maxTokens, id)
   }
 
   return { text: fullResponse, usage }
@@ -142,5 +233,7 @@ export {
   compressThreadContext,
   clearCompressionCache,
   summarizeMessagesWithAi,
+  sanitizeToolCallPairs,
+  simplifyHistoricalToolMessages,
 } from './graph/context'
 export type { CompressContextResult } from './graph/context'

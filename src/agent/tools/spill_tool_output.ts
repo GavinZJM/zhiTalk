@@ -2,14 +2,16 @@ import { promises as fs } from 'fs'
 import * as path from 'path'
 import { ToolMessage } from '@langchain/core/messages'
 import { randomUUID } from 'crypto'
+import { getZjmTalkDir } from '../config'
 
 /** tool 输出超过该字符数则落盘，messages 里只保留路径提示 */
 export const TOOL_OUTPUT_MAX_CHARS = Number(
   process.env.TOOL_OUTPUT_MAX_CHARS || 4_000,
 )
 
+/** 大输出落盘目录：`~/.zjmTalk/.tool_output`（跨平台：`os.homedir()`） */
 export function getToolOutputDir(): string {
-  return path.resolve(process.cwd(), '.data', 'tool_outputs')
+  return path.join(getZjmTalkDir(), '.tool_output')
 }
 
 export function toolOutputContentLength(content: unknown): number {

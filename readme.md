@@ -1,4 +1,4 @@
-# zhitalk
+# zjmTalk
 
 Node.js + TypeScript 项目，使用 pnpm 管理依赖，Jest 运行单元测试。
 

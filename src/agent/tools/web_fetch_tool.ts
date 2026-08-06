@@ -46,7 +46,7 @@ export async function webFetchTool(
       redirect: 'follow',
       signal: controller.signal,
       headers: {
-        'User-Agent': 'zhitalk-web-fetch/1.0',
+        'User-Agent': 'zjmTalk-web-fetch/1.0',
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
       },
     })

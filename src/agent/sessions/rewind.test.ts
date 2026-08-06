@@ -6,7 +6,7 @@ import { threadExists } from './thread_exists'
 import { createCommandRegistry } from '../commands'
 
 function createTempDbWithThread(threadId: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhitalk-rewind-'))
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zjmTalk-rewind-'))
   const dbPath = path.join(dir, 'checkpointer.db')
   const db = new Database(dbPath)
   db.exec(`
@@ -55,12 +55,10 @@ describe('threadExists', () => {
 describe('/rewind command', () => {
   it('switches thread_id when target exists', async () => {
     const dbPath = createTempDbWithThread('session-target')
-    const root = path.dirname(dbPath)
-    const prevCwd = process.cwd()
+    const dataDir = path.dirname(dbPath)
+    const prevDataDir = process.env.ZJMTALK_DATA_DIR
     try {
-      fs.mkdirSync(path.join(root, '.data'), { recursive: true })
-      fs.renameSync(dbPath, path.join(root, '.data', 'checkpointer.db'))
-      process.chdir(root)
+      process.env.ZJMTALK_DATA_DIR = dataDir
 
       let threadId = 'user-session-1'
       const registry = createCommandRegistry()
@@ -77,19 +75,18 @@ describe('/rewind command', () => {
       expect(threadId).toBe('session-target')
       expect(result?.type === 'ok' && result.message).toContain('session-target')
     } finally {
-      process.chdir(prevCwd)
-      fs.rmSync(root, { recursive: true, force: true })
+      if (prevDataDir === undefined) delete process.env.ZJMTALK_DATA_DIR
+      else process.env.ZJMTALK_DATA_DIR = prevDataDir
+      fs.rmSync(dataDir, { recursive: true, force: true })
     }
   })
 
   it('errors when thread_id is missing or unknown', async () => {
     const dbPath = createTempDbWithThread('session-only')
-    const root = path.dirname(dbPath)
-    const prevCwd = process.cwd()
+    const dataDir = path.dirname(dbPath)
+    const prevDataDir = process.env.ZJMTALK_DATA_DIR
     try {
-      fs.mkdirSync(path.join(root, '.data'), { recursive: true })
-      fs.renameSync(dbPath, path.join(root, '.data', 'checkpointer.db'))
-      process.chdir(root)
+      process.env.ZJMTALK_DATA_DIR = dataDir
 
       const registry = createCommandRegistry()
       const missingArg = await registry.dispatch('/rewind', {
@@ -110,8 +107,9 @@ describe('/rewind command', () => {
         message: 'Thread not found: no-such-thread',
       })
     } finally {
-      process.chdir(prevCwd)
-      fs.rmSync(root, { recursive: true, force: true })
+      if (prevDataDir === undefined) delete process.env.ZJMTALK_DATA_DIR
+      else process.env.ZJMTALK_DATA_DIR = prevDataDir
+      fs.rmSync(dataDir, { recursive: true, force: true })
     }
   })
 })

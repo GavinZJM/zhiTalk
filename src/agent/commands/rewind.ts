@@ -1,4 +1,5 @@
 import type { CommandDefinition } from './types'
+import { applySessionStartHooks } from '../hooks'
 import { threadExists } from '../sessions/thread_exists'
 
 /**
@@ -9,7 +10,7 @@ export const rewindCommand: CommandDefinition = {
   description: 'Resume an existing chat session by thread_id',
   usage: '/rewind <thread_id>',
   aliases: ['r'],
-  run(args, ctx) {
+  async run(args, ctx) {
     const target = args[0]?.trim()
     if (!target) {
       return {
@@ -34,6 +35,19 @@ export const rewindCommand: CommandDefinition = {
     }
 
     ctx.setThreadId(target)
+
+    const start = await applySessionStartHooks({
+      threadId: target,
+      source: 'rewind',
+    })
+    if (start.blocked) {
+      ctx.setThreadId(prev)
+      return {
+        type: 'error',
+        message: `SessionStart hook blocked rewind: ${start.blockMessage}`,
+      }
+    }
+
     return {
       type: 'ok',
       message: `Resumed session.\n  previous: ${prev}\n  current:  ${target}`,

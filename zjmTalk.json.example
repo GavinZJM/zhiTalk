@@ -1,0 +1,31 @@
+{
+  "model": {
+    "model": "kimi-k2.6",
+    "apiKey": "sk-xxx",
+    "baseURL": "https://api.moonshot.cn/v1"
+  },
+  "env": {
+    "TAVILY_API_KEY": "tvly-xxx"
+  },
+  "version": 1,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "read_file|exec",
+        "command": "src/agent/hooks/protect_env.sh",
+        "timeout": 10,
+        "failClosed": true
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "command": "src/agent/hooks/record_tool.sh",
+        "timeout": 10
+      }
+    ],
+    "SessionStart": [],
+    "SessionEnd": [],
+    "UserPromptSubmit": []
+  }
+}

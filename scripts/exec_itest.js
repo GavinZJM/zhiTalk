@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Integration: zhitalk + ask AI to list src/ via exec tool.
+ * Integration: zjmTalk + ask AI to list src/ via exec tool.
  */
 const { spawn } = require('child_process')
 const fs = require('fs')
@@ -15,7 +15,7 @@ function stripAnsi(s) {
 }
 
 async function main() {
-  const child = spawn('zhitalk', [], {
+  const child = spawn('zjmTalk', [], {
     cwd: root,
     env: {
       ...process.env,

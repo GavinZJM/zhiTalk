@@ -8,6 +8,7 @@ import {
   getCompressionCache,
   replaceMessageById,
   sanitizeToolCallPairs,
+  simplifyHistoricalToolMessages,
 } from './context'
 
 describe('sanitizeToolCallPairs', () => {
@@ -60,6 +61,79 @@ describe('sanitizeToolCallPairs', () => {
     const out = sanitizeToolCallPairs(messages)
     expect(out).toHaveLength(1)
     expect(out[0].id).toBe('h')
+  })
+})
+
+describe('simplifyHistoricalToolMessages', () => {
+  function tool(id: string, name: string, content: string) {
+    return new ToolMessage({
+      id,
+      name,
+      content,
+      tool_call_id: `call_${id}`,
+    })
+  }
+
+  it('simplifies older tool messages but keeps last 3', () => {
+    const messages = [
+      new HumanMessage({ id: 'h1', content: '搜索 aaa' }),
+      new AIMessage({ id: 'a1', content: '', tool_calls: [{ id: 'call_t1', name: 'web_search', args: {} }] }),
+      tool('t1', 'web_search', '一大堆搜索结果 aaa'),
+      new AIMessage({ id: 'a2', content: '找到了 aaa' }),
+      new HumanMessage({ id: 'h2', content: '写文件' }),
+      new AIMessage({ id: 'a3', content: '', tool_calls: [{ id: 'call_t2', name: 'write_file', args: {} }] }),
+      tool('t2', 'write_file', 'wrote ok'),
+      new AIMessage({ id: 'a4', content: '写好了' }),
+      new HumanMessage({ id: 'h3', content: '再搜' }),
+      new AIMessage({ id: 'a5', content: '', tool_calls: [{ id: 'call_t3', name: 'web_search', args: {} }] }),
+      tool('t3', 'web_search', 'result3'),
+      new AIMessage({ id: 'a6', content: '', tool_calls: [{ id: 'call_t4', name: 'exec', args: {} }] }),
+      tool('t4', 'exec', 'out4'),
+      new AIMessage({ id: 'a7', content: '', tool_calls: [{ id: 'call_t5', name: 'web_fetch', args: {} }] }),
+      tool('t5', 'web_fetch', 'out5'),
+    ]
+
+    const out = simplifyHistoricalToolMessages(messages, { keepRecentTools: 3 })
+    const tools = out.filter((m) => ToolMessage.isInstance(m)) as ToolMessage[]
+    expect(tools).toHaveLength(5)
+    expect(String(tools[0].content)).toBe('[Previous: used web_search]')
+    expect(String(tools[1].content)).toBe('[Previous: used write_file]')
+    expect(String(tools[2].content)).toBe('result3')
+    expect(String(tools[3].content)).toBe('out4')
+    expect(String(tools[4].content)).toBe('out5')
+
+    // 非 ToolMessage 不变
+    expect(out[0].content).toBe('搜索 aaa')
+    expect(out[3].content).toBe('找到了 aaa')
+  })
+
+  it('never simplifies read_file even when old', () => {
+    const messages = [
+      tool('r1', 'read_file', 'file contents here'),
+      tool('t1', 'exec', 'exec out 1'),
+      tool('t2', 'exec', 'exec out 2'),
+      tool('t3', 'exec', 'exec out 3'),
+      tool('t4', 'exec', 'exec out 4'),
+    ]
+    const out = simplifyHistoricalToolMessages(messages, { keepRecentTools: 3 })
+    const tools = out.filter((m) => ToolMessage.isInstance(m)) as ToolMessage[]
+    expect(String(tools[0].content)).toBe('file contents here')
+    expect(String(tools[1].content)).toBe('[Previous: used exec]')
+    expect(String(tools[2].content)).toBe('exec out 2')
+    expect(String(tools[3].content)).toBe('exec out 3')
+    expect(String(tools[4].content)).toBe('exec out 4')
+  })
+
+  it('does not mutate original ToolMessage objects', () => {
+    const original = tool('t1', 'web_search', 'big payload')
+    const messages = [
+      original,
+      tool('t2', 'exec', 'a'),
+      tool('t3', 'exec', 'b'),
+      tool('t4', 'exec', 'c'),
+    ]
+    simplifyHistoricalToolMessages(messages, { keepRecentTools: 3 })
+    expect(original.content).toBe('big payload')
   })
 })
 
@@ -117,6 +191,64 @@ describe('buildModelContext', () => {
     expect(out).toHaveLength(3)
     expect(ToolMessage.isInstance(out[2])).toBe(true)
     expect((out[2] as ToolMessage).tool_call_id).toBe('exec:2')
+  })
+
+  it('simplifies old tool messages in model context without touching originals', () => {
+    const history = [
+      new AIMessage({
+        id: 'a1',
+        content: '',
+        tool_calls: [{ id: 'c1', name: 'web_search', args: { q: 'aaa' } }],
+      }),
+      new ToolMessage({
+        id: 't1',
+        content: 'huge search result',
+        tool_call_id: 'c1',
+        name: 'web_search',
+      }),
+      new AIMessage({ id: 'a2', content: 'done1' }),
+      new AIMessage({
+        id: 'a3',
+        content: '',
+        tool_calls: [{ id: 'c2', name: 'write_file', args: {} }],
+      }),
+      new ToolMessage({
+        id: 't2',
+        content: 'wrote',
+        tool_call_id: 'c2',
+        name: 'write_file',
+      }),
+      new AIMessage({
+        id: 'a4',
+        content: '',
+        tool_calls: [{ id: 'c3', name: 'exec', args: {} }],
+      }),
+      new ToolMessage({
+        id: 't3',
+        content: 'exec3',
+        tool_call_id: 'c3',
+        name: 'exec',
+      }),
+      new AIMessage({
+        id: 'a5',
+        content: '',
+        tool_calls: [{ id: 'c4', name: 'exec', args: {} }],
+      }),
+      new ToolMessage({
+        id: 't4',
+        content: 'exec4',
+        tool_call_id: 'c4',
+        name: 'exec',
+      }),
+    ]
+
+    const out = buildModelContext({ messages: history, summary: '' })
+    const tools = out.filter((m) => ToolMessage.isInstance(m)) as ToolMessage[]
+    expect(String(tools[0].content)).toBe('[Previous: used web_search]')
+    expect(String(tools[1].content)).toBe('wrote')
+    expect(String(tools[2].content)).toBe('exec3')
+    expect(String(tools[3].content)).toBe('exec4')
+    expect(history[1].content).toBe('huge search result')
   })
 
   it('buildLlmInput prepends system prompt', () => {

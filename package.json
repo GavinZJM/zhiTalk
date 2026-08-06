@@ -1,24 +1,30 @@
 {
-  "name": "zhitalk",
+  "name": "zjmtalk",
   "version": "1.0.0",
   "description": "A ReAct CLI agent with tools and progressive skill loading",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "zhitalk": "./dist/agent/cli.js"
+    "zjmtalk": "./dist/agent/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-bundled-skills.cjs",
     "dev": "ts-node src/agent/cli.ts --watch",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
   },
+  "files": [
+    "dist",
+    "bundled-skills",
+    "readme.md"
+  ],
   "keywords": [],
-  "author": "zhiTalk",
-  "docs": "https://github.com/gavin/zjmTalk",
+  "author": "zhitalk",
+  "docs": "https://zhitalk.chat",
   "license": "ISC",
   "devDependencies": {
+    "@playwright/cli": "^0.1.17",
     "@types/better-sqlite3": "^7.6.13",
     "@types/figlet": "^1.7.0",
     "@types/jest": "^30.0.0",
@@ -36,6 +42,8 @@
     "@langchain/langgraph-checkpoint-sqlite": "^1.0.3",
     "@langchain/openai": "^1.5.3",
     "@langchain/tavily": "^1.2.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.11.1",
     "boxen": "^5.1.2",
     "chalk": "^4.1.2",
     "cli-table3": "^0.6.5",
@@ -44,5 +52,8 @@
     "js-yaml": "^5.2.1",
     "langchain": "^1.5.2",
     "zod": "^4.4.3"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true
   }
 }

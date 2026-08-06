@@ -1,4 +1,5 @@
 import { TavilySearch } from '@langchain/tavily'
+import { getTavilyApiKey } from '../config'
 
 export type WebSearchTopic = 'general' | 'news' | 'finance'
 
@@ -14,7 +15,7 @@ export type WebSearchOptions = {
 
 /**
  * 使用 Tavily Search API 做网页搜索。
- * API Key 默认读取环境变量 TAVILY_API_KEY。
+ * API Key 默认读取 `~/.zjmTalk/zjmTalk.json` 的 `env.TAVILY_API_KEY`。
  */
 export async function webSearchTool(
   query: string,
@@ -24,11 +25,11 @@ export async function webSearchTool(
     throw new Error('query is required')
   }
 
-  const apiKey = options.tavilyApiKey ?? process.env.TAVILY_API_KEY
+  const apiKey = options.tavilyApiKey ?? getTavilyApiKey()
   if (!options.searcher && !apiKey) {
     return (
       'TAVILY_API_KEY is not set. ' +
-      'Please add TAVILY_API_KEY to your .env file and retry.'
+      'Please add env.TAVILY_API_KEY to ~/.zjmTalk/zjmTalk.json and retry.'
     )
   }
 

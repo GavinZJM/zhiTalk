@@ -97,14 +97,14 @@ export async function runJsTool(
   const dir = options.tmpDir ?? os.tmpdir()
   const tmpFile = path.join(
     dir,
-    `zhitalk-run-js-${Date.now()}-${Math.random().toString(16).slice(2)}.js`,
+    `zjmTalk-run-js-${Date.now()}-${Math.random().toString(16).slice(2)}.js`,
   )
 
   await fs.writeFile(tmpFile, code, 'utf8')
 
   try {
     try {
-      // 等价于：node /tmp/zhitalk-run-js-xxx.js
+      // 等价于：node /tmp/zjmTalk-run-js-xxx.js
       const { stdout, stderr } = await execFileAsync(nodeBinary, [tmpFile], {
         timeout,
         maxBuffer,

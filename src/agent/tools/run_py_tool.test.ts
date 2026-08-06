@@ -68,6 +68,6 @@ describe('runPyTool', () => {
       pythonBinary,
     })
     const files = await fs.readdir(tmpDir)
-    expect(files.filter((f) => f.startsWith('zhitalk-run-py-'))).toHaveLength(0)
+    expect(files.filter((f) => f.startsWith('zjmTalk-run-py-'))).toHaveLength(0)
   })
 })

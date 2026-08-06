@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Integration: zhitalk + ask AI to web_fetch https://www.mianshipai.com/
+ * Integration: zjmTalk + ask AI to web_fetch https://www.mianshipai.com/
  */
 const { spawn } = require('child_process')
 const path = require('path')
@@ -15,13 +15,13 @@ function stripAnsi(s) {
 }
 
 async function main() {
-  const child = spawn('zhitalk', [], {
+  const child = spawn('zjmTalk', [], {
     cwd: root,
     env: {
       ...process.env,
       PATH: `${path.join(root, '.bin')}:${process.env.PATH || ''}`,
       FORCE_COLOR: '0',
-      ZHITALK_THREAD_ID: 'itest-web-fetch-' + Date.now(),
+      ZJMTALK_THREAD_ID: 'itest-web-fetch-' + Date.now(),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   })

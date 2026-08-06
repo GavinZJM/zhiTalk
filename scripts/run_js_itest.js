@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Integration: zhitalk + ask AI to run simple JS via run_js tool.
+ * Integration: zjmTalk + ask AI to run simple JS via run_js tool.
  */
 const { spawn } = require('child_process')
 const path = require('path')
@@ -14,13 +14,13 @@ function stripAnsi(s) {
 }
 
 async function main() {
-  const child = spawn('zhitalk', [], {
+  const child = spawn('zjmTalk', [], {
     cwd: root,
     env: {
       ...process.env,
       PATH: `${path.join(root, '.bin')}:${process.env.PATH || ''}`,
       FORCE_COLOR: '0',
-      ZHITALK_THREAD_ID: 'itest-run-js-' + Date.now(),
+      ZJMTALK_THREAD_ID: 'itest-run-js-' + Date.now(),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   })
@@ -50,7 +50,7 @@ async function main() {
       const returned = plain.split('You:').length >= 3
 
       if (toolCalled && returned) {
-        console.log('\n[test] PASS: run_js tool executed via zhitalk')
+        console.log('\n[test] PASS: run_js tool executed via zjmTalk')
         child.stdin.write('exit\n')
         setTimeout(() => child.kill('SIGTERM'), 800)
         return 0

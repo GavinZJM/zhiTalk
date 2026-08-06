@@ -1,13 +1,13 @@
 /**
  * Force Node fetch through an HTTP proxy (no extra deps).
- * Usage: ZHITALK_HTTPS_PROXY=http://127.0.0.1:7890 node -r ./scripts/proxy-preload.js dist/agent/cli.js
+ * Usage: ZJMTALK_HTTPS_PROXY=http://127.0.0.1:7890 node -r ./scripts/proxy-preload.js dist/agent/cli.js
  */
 const http = require('http')
 const https = require('https')
 const { URL } = require('url')
 
 const PROXY =
-  process.env.ZHITALK_HTTPS_PROXY ||
+  process.env.ZJMTALK_HTTPS_PROXY ||
   process.env.HTTPS_PROXY ||
   process.env.https_proxy ||
   'http://127.0.0.1:7890'

@@ -1,20 +1,36 @@
 #!/usr/bin/env node
 import * as readline from 'readline'
-import { AgentCancelledError, compressContext, runAgentStream } from './agent'
+import {
+  AgentCancelledError,
+  compressContext,
+  HookBlockedError,
+  initAgentRuntime,
+  runAgentStream,
+  shutdownAgentRuntime,
+} from './agent'
 import {
   createCommandRegistry,
   type CommandContext,
 } from './commands'
+import { ensureCheckpointerDatabase } from './checkpointer/db_path'
+import { ensureAppDatabase } from './db'
+import { ensurePlaywrightCli } from './ensure_playwright_cli'
+import {
+  applySessionStartHooks,
+  runSessionEndHooks,
+} from './hooks'
 import {
   formatContextWarning,
   formatTokenUsageLine,
   shouldWarnContextUsage,
 } from './models/token_usage'
+import { loadZjmTalkConfig } from './config'
 import { printStartupBanner } from './ui/banner'
 import { style } from './ui/style'
 
 // 历史由 checkpointer 按 thread_id 持久化；可用环境变量指定初始会话
-let threadId = process.env.ZHITALK_THREAD_ID || 'user-session-1'
+let threadId = process.env.ZJMTALK_THREAD_ID || 'user-session-1'
+let sessionEndFired = false
 
 const commands = createCommandRegistry()
 
@@ -38,6 +54,21 @@ function prompt(question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve))
 }
 
+async function fireSessionEnd(source: string): Promise<void> {
+  if (sessionEndFired) return
+  sessionEndFired = true
+  try {
+    await runSessionEndHooks({ threadId: session.threadId, source })
+  } catch {
+    /* best-effort */
+  }
+  try {
+    await shutdownAgentRuntime()
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** AI 回复期间监听 ESC；返回清理函数 */
 function listenForEscape(onEscape: () => void): () => void {
   // TTY：用 keypress + raw mode，识别真正的 ESC 键
@@ -53,8 +84,10 @@ function listenForEscape(onEscape: () => void): () => void {
       }
       // raw 模式下需自行处理 Ctrl+C
       if (key.ctrl && key.name === 'c') {
-        process.stdout.write('\n')
-        process.exit(0)
+        void fireSessionEnd('sigint').finally(() => {
+          process.stdout.write('\n')
+          process.exit(0)
+        })
       }
     }
 
@@ -88,21 +121,20 @@ async function chat(userInput: string): Promise<void> {
   process.stdout.write('\n' + style.ai('AI: '))
 
   const ac = new AbortController()
-  const stopListening = listenForEscape(() => {
+  let stopListening = listenForEscape(() => {
     if (!ac.signal.aborted) {
       ac.abort()
     }
   })
 
   try {
-    const result = await runAgentStream(
-      userInput,
-      (token: string) => {
+    const result = await runAgentStream(userInput, {
+      onToken: (token: string) => {
         process.stdout.write(token)
       },
-      session.threadId,
-      ac.signal,
-    )
+      threadId: session.threadId,
+      signal: ac.signal,
+    })
     process.stdout.write('\n')
     if (result.usage) {
       console.log(style.tokenUsage(formatTokenUsageLine(result.usage)))
@@ -121,6 +153,12 @@ async function chat(userInput: string): Promise<void> {
     }
     process.stdout.write('\n')
   } catch (err) {
+    if (err instanceof HookBlockedError) {
+      process.stdout.write('\n')
+      console.log(style.commandError(err.detail || err.message))
+      process.stdout.write('\n')
+      return
+    }
     if (err instanceof AgentCancelledError || ac.signal.aborted) {
       process.stdout.write('\n\n' + style.cancelled('[已取消]') + '\n\n')
       return
@@ -159,7 +197,50 @@ async function handleInput(userInput: string): Promise<'continue' | 'exit'> {
 }
 
 async function main(): Promise<void> {
+  try {
+    loadZjmTalkConfig()
+  } catch (err) {
+    console.error(
+      style.errorLabel('配置错误:'),
+      style.errorMessage((err as Error).message),
+    )
+    process.exit(1)
+  }
+
+  ensureCheckpointerDatabase()
+  ensureAppDatabase()
+
+  try {
+    await ensurePlaywrightCli()
+  } catch (err) {
+    console.error(
+      style.errorLabel('playwright-cli setup failed:'),
+      style.errorMessage((err as Error).message),
+    )
+  }
+
+  await initAgentRuntime()
+
+  const start = await applySessionStartHooks({
+    threadId: session.threadId,
+    source: 'startup',
+  })
+  if (start.blocked) {
+    console.error(
+      style.errorLabel('SessionStart hook blocked:'),
+      style.errorMessage(start.blockMessage),
+    )
+    await shutdownAgentRuntime()
+    process.exit(1)
+  }
+
   printStartupBanner()
+
+  const onSignal = (signal: string) => {
+    void fireSessionEnd(signal).finally(() => process.exit(0))
+  }
+  process.once('SIGINT', () => onSignal('sigint'))
+  process.once('SIGTERM', () => onSignal('sigterm'))
 
   while (true) {
     const userInput = await prompt(style.you('You: '))
@@ -169,6 +250,7 @@ async function main(): Promise<void> {
     try {
       const status = await handleInput(userInput.trim())
       if (status === 'exit') {
+        await fireSessionEnd('exit')
         rl.close()
         break
       }

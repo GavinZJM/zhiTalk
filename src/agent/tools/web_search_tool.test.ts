@@ -1,23 +1,43 @@
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
+import { clearZjmTalkConfigCache } from '../config'
 import { webSearchTool } from './web_search_tool'
 
+function writeTempConfig(body: unknown): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zjmTalk-websearch-'))
+  const file = path.join(dir, 'zjmTalk.json')
+  fs.writeFileSync(file, JSON.stringify(body, null, 2))
+  return file
+}
+
 describe('webSearchTool', () => {
+  const prevConfig = process.env.ZJMTALK_CONFIG
+
+  afterEach(() => {
+    clearZjmTalkConfigCache()
+    if (prevConfig === undefined) delete process.env.ZJMTALK_CONFIG
+    else process.env.ZJMTALK_CONFIG = prevConfig
+  })
+
   it('rejects empty query', async () => {
     await expect(webSearchTool('  ')).rejects.toThrow(/required/)
   })
 
-  it('returns a hint when TAVILY_API_KEY is missing', async () => {
-    const prev = process.env.TAVILY_API_KEY
-    delete process.env.TAVILY_API_KEY
-    try {
-      const result = await webSearchTool('langchain tavily')
-      expect(result).toMatch(/TAVILY_API_KEY is not set/i)
-    } finally {
-      if (prev === undefined) {
-        delete process.env.TAVILY_API_KEY
-      } else {
-        process.env.TAVILY_API_KEY = prev
-      }
-    }
+  it('returns a hint when env.TAVILY_API_KEY is missing', async () => {
+    const file = writeTempConfig({
+      model: {
+        model: 'kimi-k2.6',
+        apiKey: 'sk-test',
+        baseURL: 'https://api.moonshot.cn/v1',
+      },
+    })
+    process.env.ZJMTALK_CONFIG = file
+    clearZjmTalkConfigCache()
+
+    const result = await webSearchTool('langchain tavily')
+    expect(result).toMatch(/TAVILY_API_KEY is not set/i)
+    expect(result).toMatch(/zjmTalk\.json/i)
   })
 
   it('invokes the searcher and returns string content', async () => {

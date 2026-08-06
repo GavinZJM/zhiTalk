@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Integration: start zhitalk, ask AI to create a file, verify on disk.
+ * Integration: start zjmTalk, ask AI to create a file, verify on disk.
  */
 const { spawn } = require('child_process')
 const fs = require('fs')
@@ -8,7 +8,7 @@ const path = require('path')
 
 const root = path.resolve(__dirname, '..')
 const outFile = path.join(root, 'agent-write-demo.txt')
-const MARKER = 'zhitalk-write-file-integration-ok'
+const MARKER = 'zjmTalk-write-file-integration-ok'
 const QUESTION = `Please use the write_file tool to create a file named agent-write-demo.txt in the current working directory with exactly this content (and nothing else): ${MARKER}\n`
 
 function stripAnsi(s) {
@@ -20,7 +20,7 @@ async function main() {
     fs.unlinkSync(outFile)
   } catch (_) {}
 
-  const child = spawn('zhitalk', [], {
+  const child = spawn('zjmTalk', [], {
     cwd: root,
     env: {
       ...process.env,

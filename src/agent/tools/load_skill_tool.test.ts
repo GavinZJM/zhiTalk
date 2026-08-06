@@ -1,6 +1,7 @@
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
+import { getSkillRoots, getZjmTalkDir } from '../config'
 import {
   discoverSkills,
   formatSkillsCatalog,
@@ -8,6 +9,22 @@ import {
   parseSkillFrontmatter,
 } from '../skills/registry'
 import { loadSkillTool } from './load_skill_tool'
+
+function writeSkill(
+  root: string,
+  folder: string,
+  name: string,
+  description: string,
+  body = `# ${name}\n`,
+): void {
+  const dir = path.join(root, folder)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'SKILL.md'),
+    `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}`,
+    'utf8',
+  )
+}
 
 describe('parseSkillFrontmatter', () => {
   it('parses name and description', () => {
@@ -29,22 +46,68 @@ description: A demo skill for testing.
   })
 })
 
-describe('discoverSkills', () => {
-  it('discovers built-in planner and programmer-resume skills', () => {
+describe('getSkillRoots', () => {
+  it('includes bundled-skills then ~/.zjmTalk agents/skills', () => {
+    const roots = getSkillRoots()
+    expect(roots).toHaveLength(3)
+    expect(roots[0]).toMatch(/bundled-skills$/)
+    expect(fs.existsSync(roots[0])).toBe(true)
+    expect(roots[1]).toBe(path.join(getZjmTalkDir(), '.agents', 'skills'))
+    expect(roots[2]).toBe(path.join(getZjmTalkDir(), 'skills'))
+    expect(getZjmTalkDir()).toBe(path.join(os.homedir(), '.zjmTalk'))
+  })
+
+  it('discoverSkills finds built-in planner from bundled-skills', () => {
     const skills = discoverSkills()
     const names = skills.map((s) => s.name)
     expect(names).toContain('planner')
-    expect(names).toContain('programmer-resume')
-    for (const s of skills) {
-      expect(s.description.length).toBeGreaterThan(0)
-      expect(fs.existsSync(s.skillFile)).toBe(true)
+    expect(names).toContain('skill-creator')
+  })
+})
+
+describe('discoverSkills', () => {
+  it('returns empty array when roots are missing (no throw)', () => {
+    const missing = path.join(
+      os.tmpdir(),
+      `zjmTalk-skills-missing-${Date.now()}`,
+    )
+    expect(discoverSkills(missing)).toEqual([])
+    expect(discoverSkills([missing, path.join(missing, 'also')])).toEqual([])
+  })
+
+  it('later root overrides earlier root on same skill name', () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'zjmTalk-skills-'))
+    const agents = path.join(base, '.agents', 'skills')
+    const user = path.join(base, 'skills')
+    try {
+      writeSkill(agents, 'shared', 'shared', 'from agents', '# agents\n')
+      writeSkill(user, 'shared', 'shared', 'from user', '# user\n')
+      writeSkill(agents, 'only-agents', 'only-agents', 'agents only')
+
+      const skills = discoverSkills([agents, user])
+      const byName = Object.fromEntries(skills.map((s) => [s.name, s]))
+
+      expect(byName['shared']?.description).toBe('from user')
+      expect(byName['shared']?.dir).toBe(path.join(user, 'shared'))
+      expect(byName['only-agents']?.description).toBe('agents only')
+      expect(skills.map((s) => s.name).sort()).toEqual([
+        'only-agents',
+        'shared',
+      ])
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true })
     }
   })
 
-  it('formatSkillsCatalog includes names', () => {
-    const catalog = formatSkillsCatalog(discoverSkills())
-    expect(catalog).toMatch(/planner/)
-    expect(catalog).toMatch(/programmer-resume/)
+  it('formatSkillsCatalog includes discovered names', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zjmTalk-skills-cat-'))
+    try {
+      writeSkill(root, 'planner', 'planner', 'Plan tasks.')
+      const catalog = formatSkillsCatalog(discoverSkills(root))
+      expect(catalog).toMatch(/planner/)
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true })
+    }
   })
 })
 
@@ -53,20 +116,12 @@ describe('loadSkillTool', () => {
 
   beforeEach(() => {
     tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-test-'))
-    const dir = path.join(tmpRoot, 'hello-skill')
-    fs.mkdirSync(dir)
-    fs.writeFileSync(
-      path.join(dir, 'SKILL.md'),
-      `---
-name: hello-skill
-description: Says hello when loaded.
----
-
-# Hello Skill
-
-Do the hello thing.
-`,
-      'utf8',
+    writeSkill(
+      tmpRoot,
+      'hello-skill',
+      'hello-skill',
+      'Says hello when loaded.',
+      '# Hello Skill\n\nDo the hello thing.\n',
     )
   })
 
@@ -103,19 +158,7 @@ Do the hello thing.
   })
 
   it('only loads one skill content at a time (exact file match)', async () => {
-    const other = path.join(tmpRoot, 'other-skill')
-    fs.mkdirSync(other)
-    fs.writeFileSync(
-      path.join(other, 'SKILL.md'),
-      `---
-name: other-skill
-description: Other.
----
-
-# Other
-`,
-      'utf8',
-    )
+    writeSkill(tmpRoot, 'other-skill', 'other-skill', 'Other.', '# Other\n')
 
     const skills = discoverSkills(tmpRoot)
     const content = await loadSkillTool('hello-skill', { skills })

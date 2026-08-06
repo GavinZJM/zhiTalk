@@ -95,14 +95,14 @@ export async function runPyTool(
   const dir = options.tmpDir ?? os.tmpdir()
   const tmpFile = path.join(
     dir,
-    `zhitalk-run-py-${Date.now()}-${Math.random().toString(16).slice(2)}.py`,
+    `zjmTalk-run-py-${Date.now()}-${Math.random().toString(16).slice(2)}.py`,
   )
 
   await fs.writeFile(tmpFile, code, 'utf8')
 
   try {
     try {
-      // 等价于：python3 /tmp/zhitalk-run-py-xxx.py
+      // 等价于：python3 /tmp/zjmTalk-run-py-xxx.py
       const { stdout, stderr } = await execFileAsync(pythonBinary, [tmpFile], {
         timeout,
         maxBuffer,
