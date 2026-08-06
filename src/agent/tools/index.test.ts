@@ -139,16 +139,19 @@ describe('tools registry', () => {
     const result = await run_js_tool.invoke({
       code: 'console.log(1 + 2)',
     })
-    expect(result).toMatch(/exit_code: 0/)
-    expect(result).toMatch(/\b3\b/)
+    // Strip ANSI so colored stdout (hidden in Jest diffs) still matches.
+    const plain = String(result).replace(/\u001b\[[0-9;]*m/g, '')
+    expect(plain).toMatch(/exit_code: 0/)
+    expect(plain).toMatch(/stdout:\s*3\b/)
   })
 
   it('invokes run_py_tool via schema-bound wrapper', async () => {
     const result = await run_py_tool.invoke({
       code: 'print(1 + 2)',
     })
-    expect(result).toMatch(/exit_code: 0/)
-    expect(result).toMatch(/\b3\b/)
+    const plain = String(result).replace(/\u001b\[[0-9;]*m/g, '')
+    expect(plain).toMatch(/exit_code: 0/)
+    expect(plain).toMatch(/stdout:\s*3\b/)
   })
 
   it('web_search_tool is invokable', () => {

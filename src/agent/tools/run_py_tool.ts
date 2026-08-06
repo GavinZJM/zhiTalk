@@ -106,7 +106,7 @@ export async function runPyTool(
       const { stdout, stderr } = await execFileAsync(pythonBinary, [tmpFile], {
         timeout,
         maxBuffer,
-        env: process.env,
+        env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
       })
       return formatResult(0, stdout, stderr)
     } catch (err) {

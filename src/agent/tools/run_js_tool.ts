@@ -108,7 +108,8 @@ export async function runJsTool(
       const { stdout, stderr } = await execFileAsync(nodeBinary, [tmpFile], {
         timeout,
         maxBuffer,
-        env: process.env,
+        // Keep script output machine-readable for the agent (no ANSI colors).
+        env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
       })
       return formatResult(0, stdout, stderr)
     } catch (err) {
