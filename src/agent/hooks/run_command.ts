@@ -197,9 +197,14 @@ export function runHookCommand(
       }
     })
 
+    // Hooks often exit before reading stdin (e.g. exit 1 immediately).
+    // On Linux that surfaces as async EPIPE on stdin — not a sync throw.
+    child.stdin?.on('error', () => {
+      /* ignore broken pipe / closed stdin */
+    })
+
     try {
-      child.stdin?.write(JSON.stringify(payload))
-      child.stdin?.end()
+      child.stdin?.end(JSON.stringify(payload))
     } catch {
       // stdin 写失败时仍等 process 结束
     }
