@@ -138,10 +138,20 @@ export async function runAgentStream(
 
   const graph = getAgentGraph(variant)
 
+  // LangGraph 默认 25：agent↔tools 各算一步，复杂任务容易触顶。
+  // 可用 ZJMTALK_RECURSION_LIMIT 覆盖（正整数）。
+  const recursionLimit = (() => {
+    const raw = process.env.ZJMTALK_RECURSION_LIMIT?.trim()
+    if (!raw) return 100
+    const n = Number.parseInt(raw, 10)
+    return Number.isFinite(n) && n > 0 ? n : 100
+  })()
+
   const config = {
     configurable: { thread_id: tid },
     signal: abortSignal,
     streamMode: 'messages' as const,
+    recursionLimit,
   }
 
   const inputMessages: Array<

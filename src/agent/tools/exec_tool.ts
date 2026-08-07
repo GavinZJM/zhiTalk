@@ -105,7 +105,10 @@ export async function execTool(
       cwd,
       timeout,
       maxBuffer,
-      shell: process.env.SHELL || '/bin/zsh',
+      shell:
+        process.env.SHELL ||
+        process.env.ComSpec ||
+        (process.platform === 'win32' ? 'cmd.exe' : '/bin/zsh'),
     })
     return formatResult(0, stdout, stderr)
   } catch (err) {

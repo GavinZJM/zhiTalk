@@ -193,7 +193,7 @@ export function formatConfigManual(): string {
     '',
     '  env（可选）',
     '    字符串键值；供工具读取（不会自动写入 process.env）。',
-    '    TAVILY_API_KEY  → 启用 web_search',
+    '    TAVILY_API_KEY  → 启用 web_search（也可用进程环境变量 / 项目 .env）',
     '',
     '  version（可选）',
     '    数字，默认 1。',
@@ -214,6 +214,7 @@ export function formatConfigManual(): string {
     '',
     '四、其它环境变量',
     '  ZJMTALK_CONFIG / ZJMTALK_DATA_DIR / ZJMTALK_THREAD_ID / ZJMTALK_MCP_CONFIG',
+    '  ZJMTALK_RECURSION_LIMIT  LangGraph 步数上限（默认 100；agent↔tools 各算 1 步）',
     '',
     '五、可选增强完整示例（复制时请删掉本段以外的说明文字；JSON 禁止 //）',
     '  {',
@@ -404,6 +405,13 @@ export function getConfigEnv(
   return value && value.trim() ? value.trim() : undefined
 }
 
+/**
+ * Tavily Key：优先 `zjmTalk.json` 的 `env.TAVILY_API_KEY`，
+ * 否则回退 `process.env.TAVILY_API_KEY`（如项目 `.env` / dotenv）。
+ */
 export function getTavilyApiKey(configPath?: string): string | undefined {
-  return getConfigEnv('TAVILY_API_KEY', configPath)
+  const fromConfig = getConfigEnv('TAVILY_API_KEY', configPath)
+  if (fromConfig) return fromConfig
+  const fromProcess = process.env.TAVILY_API_KEY?.trim()
+  return fromProcess || undefined
 }

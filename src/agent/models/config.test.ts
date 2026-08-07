@@ -117,6 +117,26 @@ describe('zjmTalk config', () => {
     expect(loadModelConfig()).toEqual(cfg.model)
   })
 
+  it('getTavilyApiKey falls back to process.env when config env omits it', () => {
+    const file = writeTempConfig({
+      model: {
+        model: 'kimi-k2.6',
+        apiKey: 'sk-test',
+        baseURL: 'https://api.moonshot.cn/v1',
+      },
+    })
+    const prevTavily = process.env.TAVILY_API_KEY
+    process.env.ZJMTALK_CONFIG = file
+    process.env.TAVILY_API_KEY = 'tvly-from-process'
+    clearZjmTalkConfigCache()
+    try {
+      expect(getTavilyApiKey()).toBe('tvly-from-process')
+    } finally {
+      if (prevTavily === undefined) delete process.env.TAVILY_API_KEY
+      else process.env.TAVILY_API_KEY = prevTavily
+    }
+  })
+
   it('getMCPServerConfig reads mcpServers from zjmTalk.json', () => {
     const file = writeTempConfig({
       model: {

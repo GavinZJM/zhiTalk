@@ -54,6 +54,13 @@ export async function webSearchTool(
     return JSON.stringify(result, null, 2)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    if (/401|Unauthorized/i.test(message)) {
+      return (
+        'Web search failed: Tavily returned 401 Unauthorized. ' +
+        'Check that TAVILY_API_KEY is valid (https://tavily.com), then set it in ' +
+        '~/.zjmTalk/zjmTalk.json as env.TAVILY_API_KEY (or process env / .env) and restart.'
+      )
+    }
     return `Web search failed: ${message}`
   }
 }

@@ -75,4 +75,14 @@ describe('webSearchTool', () => {
       /Web search failed: rate limited/,
     )
   })
+
+  it('explains Tavily 401 Unauthorized', async () => {
+    const searcher = {
+      invoke: jest.fn().mockRejectedValue(new Error('Unauthorized 401')),
+    }
+
+    const result = await webSearchTool('q', { searcher })
+    expect(result).toMatch(/401 Unauthorized/i)
+    expect(result).toMatch(/TAVILY_API_KEY/)
+  })
 })
